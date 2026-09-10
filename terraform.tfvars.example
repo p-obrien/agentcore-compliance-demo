@@ -1,0 +1,28 @@
+# Copy to terraform.tfvars (git-ignored) and fill in.
+# Authenticate to AWS with your own SSO profile before running tofu:
+#
+#   aws sso login --profile <your-profile>
+#   export AWS_PROFILE=<your-profile>
+#
+# You can either set AWS_PROFILE in the environment (leave aws_profile null),
+# or set aws_profile below. Do not commit a real profile name.
+
+aws_region = "ap-southeast-2"
+
+# aws_profile = "your-sso-profile"   # optional; prefer AWS_PROFILE env var
+
+name_prefix = "agentcore-compliance-demo"
+
+tags = {
+  project    = "agentcore-compliance-demo"
+  owner      = "pobrien"
+  managed_by = "opentofu"
+  ephemeral  = "true"
+}
+
+# Models via the Australia cross-region inference profiles. Override only if
+# the account uses different profile IDs.
+# model_assessment_id     = "apac.anthropic.claude-sonnet-4-5-20250929-v1:0"
+# model_classification_id = "apac.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+enable_scheduled_destroy = false

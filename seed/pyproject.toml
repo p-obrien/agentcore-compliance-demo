@@ -1,0 +1,22 @@
+[project]
+name = "agentcore-compliance-demo-seed"
+version = "0.1.0"
+description = "AWS-native seed loader for the AgentCore compliance demo lab"
+requires-python = ">=3.12"
+dependencies = [
+  "boto3==1.43.86",
+]
+
+[dependency-groups]
+test = [
+  "hypothesis==6.122.3",
+  "jsonschema==4.23.0",
+  "pytest==8.3.4",
+]
+
+[tool.uv]
+default-groups = ["test"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"

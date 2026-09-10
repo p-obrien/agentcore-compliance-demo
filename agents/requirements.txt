@@ -1,0 +1,5 @@
+# Direct runtime dependencies. uv.lock fixes the complete transitive graph.
+bedrock-agentcore==1.22.0
+boto3==1.43.86
+PyJWT[crypto]==2.13.0
+strands-agents==1.54.0

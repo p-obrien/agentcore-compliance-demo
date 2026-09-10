@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title description">
+  <title id="title">Tenant-isolation and approval flow</title>
+  <desc id="description">A verified Cognito identity flows through AgentCore and Gateway to a retrieval Lambda. The Lambda applies server-side filters to a shared OpenSearch domain for Agencies A and B. A separate Agency C domain denies the shared identity. Assessments require Step Functions approval before writing records, with audit events recorded throughout.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .boundary { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; }
+      .identity { fill: #e0f2fe; stroke: #0284c7; stroke-width: 2; }
+      .compute { fill: #ede9fe; stroke: #7c3aed; stroke-width: 2; }
+      .data { fill: #dcfce7; stroke: #16a34a; stroke-width: 2; }
+      .protected { fill: #fff7ed; stroke: #ea580c; stroke-width: 2; }
+      .process { fill: #fef3c7; stroke: #d97706; stroke-width: 2; }
+      .audit { fill: #f1f5f9; stroke: #475569; stroke-width: 2; }
+      .line { fill: none; stroke: #334155; stroke-width: 2.5; marker-end: url(#arrow); }
+      .deny { fill: none; stroke: #dc2626; stroke-width: 3; stroke-dasharray: 8 6; marker-end: url(#denyArrow); }
+      .title { font: 700 22px Arial, sans-serif; fill: #0f172a; }
+      .label { font: 700 16px Arial, sans-serif; fill: #0f172a; }
+      .text { font: 14px Arial, sans-serif; fill: #334155; }
+      .small { font: 13px Arial, sans-serif; fill: #334155; }
+      .note { font: 700 14px Arial, sans-serif; fill: #b91c1c; }
+      .section { font: 700 15px Arial, sans-serif; fill: #475569; letter-spacing: 1px; }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
+    </marker>
+    <marker id="denyArrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#dc2626"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1200" height="720"/>
+  <text x="50" y="48" class="title">How the lab prevents cross-tenant access</text>
+  <text x="50" y="76" class="text">Tenant identity drives every retrieval decision. Caller-supplied tenant fields and model output do not.</text>
+
+  <rect class="boundary" x="40" y="108" width="1120" height="328" rx="16"/>
+  <text x="68" y="140" class="section">RETRIEVAL PATH</text>
+
+  <rect class="identity" x="68" y="174" width="178" height="112" rx="12"/>
+  <text x="92" y="211" class="label">Cognito identity</text>
+  <text x="87" y="238" class="text">Signed user, tenant,</text>
+  <text x="93" y="260" class="text">and group claims</text>
+
+  <rect class="compute" x="302" y="174" width="188" height="112" rx="12"/>
+  <text x="326" y="211" class="label">AgentCore agent</text>
+  <text x="328" y="238" class="text">Verifies both tokens</text>
+  <text x="323" y="260" class="text">Mints 5-minute scope</text>
+
+  <rect class="compute" x="546" y="174" width="180" height="112" rx="12"/>
+  <text x="576" y="211" class="label">Gateway + Lambda</text>
+  <text x="565" y="238" class="text">Verifies capability</text>
+  <text x="559" y="260" class="text">Assumes tier read role</text>
+
+  <rect class="data" x="790" y="156" width="324" height="144" rx="12"/>
+  <text x="823" y="190" class="label">Shared OpenSearch domain</text>
+  <text x="824" y="218" class="text">Agencies A and B</text>
+  <text x="812" y="246" class="text">Server-side tenant and ACL filters</text>
+  <text x="844" y="270" class="small">Only matching permits return</text>
+
+  <path class="line" d="M246 230 H302"/>
+  <path class="line" d="M490 230 H546"/>
+  <path class="line" d="M726 230 H790"/>
+  <text x="260" y="157" class="small">verified claims</text>
+  <text x="504" y="157" class="small">signed capability</text>
+  <text x="674" y="157" class="small">filtered query</text>
+
+  <rect class="protected" x="790" y="326" width="324" height="82" rx="12"/>
+  <text x="821" y="359" class="label">Agency C dedicated domain</text>
+  <text x="824" y="385" class="text">Resource policy denies shared role</text>
+  <path class="deny" d="M726 267 C756 267, 754 367, 790 367"/>
+  <text x="624" y="342" class="note">AWS denies direct access</text>
+  <text x="643" y="364" class="small">No document payload</text>
+
+  <rect class="boundary" x="40" y="468" width="1120" height="208" rx="16"/>
+  <text x="68" y="500" class="section">ASSESSMENT, APPROVAL, AND AUDIT PATH</text>
+
+  <rect class="compute" x="68" y="534" width="202" height="98" rx="12"/>
+  <text x="104" y="569" class="label">Assessment agent</text>
+  <text x="96" y="596" class="text">Grounding check creates</text>
+  <text x="109" y="618" class="text">a pending proposal</text>
+
+  <rect class="process" x="350" y="534" width="198" height="98" rx="12"/>
+  <text x="384" y="569" class="label">Step Functions</text>
+  <text x="373" y="596" class="text">Waits for an authenticated</text>
+  <text x="412" y="618" class="text">tenant approver</text>
+
+  <rect class="data" x="630" y="534" width="192" height="98" rx="12"/>
+  <text x="686" y="569" class="label">Records table</text>
+  <text x="658" y="596" class="text">Writes only after approval</text>
+
+  <rect class="audit" x="902" y="534" width="212" height="98" rx="12"/>
+  <text x="957" y="569" class="label">Audit trail</text>
+  <text x="932" y="596" class="text">Retrieval, spoof attempts,</text>
+  <text x="943" y="618" class="text">and approver identity</text>
+
+  <path class="line" d="M270 583 H350"/>
+  <path class="line" d="M548 583 H630"/>
+  <path class="line" d="M270 621 C500 661, 764 661, 902 621"/>
+  <text x="553" y="656" class="small">events recorded across the workflow</text>
+</svg>

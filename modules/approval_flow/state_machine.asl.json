@@ -1,0 +1,96 @@
+{
+  "Comment": "Register pending -> wait for authenticated decision (task token) -> approve(commit)/reject/commit-failure terminal paths",
+  "StartAt": "RegisterPendingApproval",
+  "States": {
+    "RegisterPendingApproval": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${register_pending_function_arn}",
+        "Payload": {
+          "taskToken.$": "$$.Task.Token",
+          "payload.$": "$.payload"
+        }
+      },
+      "ResultPath": "$.approval",
+      "Next": "DecisionChoice"
+    },
+    "DecisionChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.approval.decision",
+          "StringEquals": "approve",
+          "Next": "WriteBack"
+        }
+      ],
+      "Default": "Rejected"
+    },
+    "WriteBack": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${write_back_function_arn}",
+        "Payload": {
+          "action": "commit",
+          "approver.$": "$.approval.approver",
+          "payload.$": "$.payload"
+        }
+      },
+      "ResultPath": "$.writeback",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "CommitFailed"
+        }
+      ],
+      "Next": "Approved"
+    },
+    "Approved": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${write_back_function_arn}",
+        "Payload": {
+          "action": "finalize_status",
+          "status": "APPROVED",
+          "approver.$": "$.approval.approver",
+          "payload.$": "$.payload"
+        }
+      },
+      "ResultPath": "$.finalize",
+      "End": true
+    },
+    "Rejected": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${write_back_function_arn}",
+        "Payload": {
+          "action": "finalize_status",
+          "status": "REJECTED",
+          "approver.$": "$.approval.approver",
+          "payload.$": "$.payload"
+        }
+      },
+      "ResultPath": "$.finalize",
+      "End": true
+    },
+    "CommitFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${write_back_function_arn}",
+        "Payload": {
+          "action": "finalize_status",
+          "status": "COMMIT_FAILED",
+          "approver.$": "$.approval.approver",
+          "payload.$": "$.payload"
+        }
+      },
+      "ResultPath": "$.finalize",
+      "End": true
+    }
+  }
+}

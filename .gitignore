@@ -1,0 +1,40 @@
+# OpenTofu / Terraform
+# Provider selections are committed in .terraform.lock.hcl.
+# State files and local provider caches remain machine-local.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Local var files with real values / secrets / profile names
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Plan output
+*.tfplan
+
+# Transient state lock
+.terraform.tfstate.lock.info
+
+# Lambda build artefacts (zipped at apply time by the archive provider)
+**/build/
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.hypothesis/
+
+# Editor / OS
+.agent-image-uri
+.DS_Store
+.idea/
+.vscode/

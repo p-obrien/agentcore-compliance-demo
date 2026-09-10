@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Permit Assessment Approvals</title>
+  <style>
+    body{font-family:system-ui,sans-serif;margin:2rem;color:#1a1a1a}h1{font-size:1.4rem}.card{border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0}.meta{color:#555;font-size:.85rem}.low{color:#b00;font-weight:600}button{padding:.5rem 1rem;margin-right:.5rem;border:0;border-radius:6px;cursor:pointer}.approve{background:#1a7f37;color:#fff}.reject{background:#b00;color:#fff}pre{background:#f6f6f6;padding:.75rem;border-radius:6px;white-space:pre-wrap}#empty{color:#666}.hidden{display:none}
+  </style>
+</head>
+<body>
+  <h1>Permit Assessment Approvals</h1>
+  <p class="meta">A Cognito-authenticated approver must make every decision. The API records the verified subject, not a browser-supplied name.</p>
+  <button id="login" class="hidden">Sign in</button><button id="logout" class="hidden">Sign out</button>
+  <div id="list"><p id="empty">Authenticating…</p></div>
+<script>
+const API_BASE="${api_base_url}", HOSTED_UI="${cognito_hosted_ui_domain}", CLIENT_ID="${cognito_client_id}", REDIRECT_URI="${redirect_uri}";
+const key = "approval-oidc";
+const b64url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+async function pkce(){const v=crypto.getRandomValues(new Uint8Array(32));const verifier=b64url(v);const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier));return {verifier,challenge:b64url(digest)}}
+function tokens(){try{return JSON.parse(sessionStorage.getItem(key)||"null")}catch{return null}}
+function setTokens(t){sessionStorage.setItem(key,JSON.stringify(t))}
+async function login(){const p=await pkce(),state=crypto.randomUUID();sessionStorage.setItem("approval-pkce",JSON.stringify({...p,state}));location.href=HOSTED_UI+"/login?"+new URLSearchParams({response_type:"code",client_id:CLIENT_ID,redirect_uri:REDIRECT_URI,scope:"openid email profile",code_challenge:p.challenge,code_challenge_method:"S256",state})}
+async function callback(){const q=new URLSearchParams(location.search),code=q.get("code");if(!code)return;const p=JSON.parse(sessionStorage.getItem("approval-pkce")||"{}");if(q.get("state")!==p.state)throw Error("OAuth state mismatch");const r=await fetch(HOSTED_UI+"/oauth2/token",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"authorization_code",client_id:CLIENT_ID,code,redirect_uri:REDIRECT_URI,code_verifier:p.verifier})});if(!r.ok)throw Error("Cognito token exchange failed");setTokens(await r.json());history.replaceState({},"",REDIRECT_URI)}
+async function api(path,opts={}){const t=tokens();if(!t?.access_token){await login();throw Error("redirecting to login")}const r=await fetch(API_BASE+path,{...opts,headers:{...(opts.headers||{}),authorization:"Bearer "+t.access_token}});if(r.status===401||r.status===403){sessionStorage.removeItem(key);await login();throw Error("session expired")}const b=await r.json();if(!r.ok)throw Error(b.error||"request failed");return b}
+async function load(){const list=document.getElementById("list");try{const pending=(await api("/pending")).pending||[];if(!pending.length){list.innerHTML='<p id="empty">No pending approvals.</p>';return}list.innerHTML="";for(const p of pending){const score=parseFloat(p.grounding_score),card=document.createElement("div");card.className="card";card.innerHTML='<div class="meta">Tenant: <b>'+p.tenant_id+'</b> · Permit: '+p.permit_id+' · Grounding: <span class="'+(!isNaN(score)&&score<.75?"low":"")+'">'+p.grounding_score+'</span> · '+p.review_reason+'</div><button class="approve">Approve</button><button class="reject">Reject</button>';card.querySelector(".approve").onclick=()=>decide(p.approval_id,"approve");card.querySelector(".reject").onclick=()=>decide(p.approval_id,"reject");list.appendChild(card)}}catch(e){list.innerHTML='<p id="empty">'+e.message+'</p>'}}
+async function decide(id,decision){await api("/decide",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({approval_id:id,decision})});load()}
+document.getElementById("login").onclick=login;document.getElementById("logout").onclick=()=>{sessionStorage.clear();location.href=HOSTED_UI+"/logout?"+new URLSearchParams({client_id:CLIENT_ID,logout_uri:REDIRECT_URI})};
+(async()=>{try{await callback();document.getElementById(tokens()?"logout":"login").classList.remove("hidden");await load()}catch(e){document.getElementById("list").innerHTML='<p id="empty">Authentication failed: '+e.message+'</p>';document.getElementById("login").classList.remove("hidden")}})();
+</script></body></html>
