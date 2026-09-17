@@ -33,3 +33,15 @@ variable "permissions_boundary_arn" {
   description = "Workload permissions boundary attached to the demo API Lambda role."
   type        = string
 }
+
+variable "throttle_burst_limit" {
+  description = "API Gateway stage burst limit (concurrent requests). Each /assess relays a full model invocation, so cap it."
+  type        = number
+  default     = 10
+}
+
+variable "throttle_rate_limit" {
+  description = "API Gateway stage steady-state request rate (requests/second)."
+  type        = number
+  default     = 5
+}

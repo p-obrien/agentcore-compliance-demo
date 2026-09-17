@@ -51,10 +51,13 @@ resource "aws_iam_role_policy" "api" {
         Resource = [var.pending_table_arn, "${var.pending_table_arn}/index/*", var.audit_table_arn]
       },
       {
-        # Resume the suspended state machine.
+        # Resume the one suspended approval state machine. SendTaskSuccess and
+        # SendTaskFailure take a task token, not an ARN, so IAM cannot scope by
+        # token; scope to the state machine ARN, which is the tightest resource
+        # this action accepts.
         Effect   = "Allow"
         Action   = ["states:SendTaskSuccess", "states:SendTaskFailure"]
-        Resource = "*"
+        Resource = var.state_machine_arn
       }
     ]
   })
@@ -126,11 +129,45 @@ resource "aws_apigatewayv2_route" "decide" {
   authorizer_id      = aws_apigatewayv2_authorizer.approval.id
 }
 
+# Access log for the request layer. The application audit trail lives in
+# DynamoDB; this captures every HTTP request that reached the API, including
+# ones the JWT authorizer rejected, which the app audit never sees.
+resource "aws_cloudwatch_log_group" "api_access" {
+  name              = "/aws/apigateway/${var.name_prefix}-approval-api"
+  retention_in_days = 14
+  tags              = var.tags
+}
+
 resource "aws_apigatewayv2_stage" "this" {
   api_id      = aws_apigatewayv2_api.this.id
   name        = "$default"
   auto_deploy = true
   tags        = var.tags
+
+  # HTTP APIs (v2) cannot sit behind WAF, so stage throttling is the native
+  # rate control for this internet-facing, JWT-protected surface. Every data
+  # route relays to DynamoDB or resumes the model-backed approval workflow, so
+  # cap request rate to blunt an authenticated caller or a leaked token.
+  default_route_settings {
+    throttling_burst_limit = var.throttle_burst_limit
+    throttling_rate_limit  = var.throttle_rate_limit
+  }
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_access.arn
+    format = jsonencode({
+      requestId               = "$context.requestId"
+      ip                      = "$context.identity.sourceIp"
+      requestTime             = "$context.requestTime"
+      httpMethod              = "$context.httpMethod"
+      routeKey                = "$context.routeKey"
+      status                  = "$context.status"
+      protocol                = "$context.protocol"
+      responseLength          = "$context.responseLength"
+      authorizerError         = "$context.authorizer.error"
+      integrationErrorMessage = "$context.integrationErrorMessage"
+    })
+  }
 }
 
 resource "aws_lambda_permission" "apigw" {

@@ -81,6 +81,7 @@ module "approval_site" {
   cognito_issuer             = module.identity.issuer
   cognito_approval_client_id = module.identity.approval_client_id
   cognito_hosted_ui_domain   = module.identity.hosted_ui_domain
+  state_machine_arn          = module.approval_flow.state_machine_arn
   permissions_boundary_arn   = module.iam_boundary.boundary_policy_arn
 }
 

@@ -164,11 +164,44 @@ resource "aws_apigatewayv2_route" "audit_recent" {
   authorizer_id      = aws_apigatewayv2_authorizer.agent.id
 }
 
+# Access log for the request layer. The application audit trail lives in
+# DynamoDB; this captures every HTTP request that reached the API, including
+# JWT-authorizer rejections the app audit never records.
+resource "aws_cloudwatch_log_group" "api_access" {
+  name              = "/aws/apigateway/${var.name_prefix}-demo-api"
+  retention_in_days = 14
+  tags              = var.tags
+}
+
 resource "aws_apigatewayv2_stage" "this" {
   api_id      = aws_apigatewayv2_api.this.id
   name        = "$default"
   auto_deploy = true
   tags        = var.tags
+
+  # HTTP APIs (v2) cannot sit behind WAF, so stage throttling is the native
+  # rate control. /assess relays a full model invocation, so keep the cap
+  # tight to blunt an authenticated caller or a leaked token.
+  default_route_settings {
+    throttling_burst_limit = var.throttle_burst_limit
+    throttling_rate_limit  = var.throttle_rate_limit
+  }
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_access.arn
+    format = jsonencode({
+      requestId               = "$context.requestId"
+      ip                      = "$context.identity.sourceIp"
+      requestTime             = "$context.requestTime"
+      httpMethod              = "$context.httpMethod"
+      routeKey                = "$context.routeKey"
+      status                  = "$context.status"
+      protocol                = "$context.protocol"
+      responseLength          = "$context.responseLength"
+      authorizerError         = "$context.authorizer.error"
+      integrationErrorMessage = "$context.integrationErrorMessage"
+    })
+  }
 }
 
 resource "aws_lambda_permission" "apigw" {
