@@ -38,3 +38,24 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+.kiro/
+
+# AI coding tools
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+.cursor/
+.cursorrules
+.cursorignore
+.github/copilot-instructions.md
+.windsurf/
+.windsurfrules
+.aider*
+.continue/
+.codeium/
+.cline/
+.roo/
+.gemini/
+GEMINI.md
+.amazonq/
