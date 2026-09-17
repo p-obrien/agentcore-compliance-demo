@@ -15,7 +15,7 @@ name_prefix = "agentcore-compliance-demo"
 
 tags = {
   project    = "agentcore-compliance-demo"
-  owner      = "pobrien"
+  owner      = "your-name"
   managed_by = "opentofu"
   ephemeral  = "true"
 }
