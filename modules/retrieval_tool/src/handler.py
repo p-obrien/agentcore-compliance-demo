@@ -37,6 +37,7 @@ import uuid
 import boto3
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
+from botocore.config import Config
 from botocore.credentials import Credentials
 
 # Per-tenant resolved target contract. Populated from the managed-domain module
@@ -72,9 +73,13 @@ _SPOOF_KEYS = (
     "tier",
 )
 
-_secrets = boto3.client("secretsmanager", region_name=REGION)
-_sts = boto3.client("sts", region_name=REGION)
-_ddb = boto3.client("dynamodb", region_name=REGION)
+# Bound every AWS API call so a stalled control-plane request fails fast and
+# closed instead of hanging until the Lambda timeout. Without this, boto3's
+# long default socket timeouts let a single slow call consume the whole budget.
+_BOTO_CFG = Config(connect_timeout=3, read_timeout=5, retries={"max_attempts": 2})
+_secrets = boto3.client("secretsmanager", region_name=REGION, config=_BOTO_CFG)
+_sts = boto3.client("sts", region_name=REGION, config=_BOTO_CFG)
+_ddb = boto3.client("dynamodb", region_name=REGION, config=_BOTO_CFG)
 _session_key = None
 _assumed_credentials = {}
 
@@ -119,7 +124,7 @@ def _verified_session(event):
     The capability is the only source of tenant, ACL groups, and subject. No
     field is read from prompt text, MCP content arguments, or model output.
     """
-    token = (event.get("arguments") or {}).get("session_token")
+    token = _arguments(event).get("session_token")
     if not isinstance(token, str) or token.count(".") != 1:
         raise ValueError("missing signed session context")
 
@@ -178,9 +183,30 @@ def _resolve_target(tenant_id):
     }
 
 
+def _arguments(event):
+    """Return the tool arguments regardless of invocation shape.
+
+    The AgentCore Gateway invokes this Lambda target with the tool arguments at
+    the TOP LEVEL of the event (``{"query": ..., "permit_id": ...,
+    "session_token": ...}``). The operator rehearsal scripts invoke the Lambda
+    directly with the arguments nested under ``arguments``
+    (``{"arguments": {...}}``). Support both: prefer an explicit ``arguments``
+    dict when present, otherwise treat the event itself as the argument map.
+    Reading only ``arguments`` silently dropped the signed session_token on the
+    real Gateway path, so every agent retrieval returned invalid_session_context
+    with zero documents.
+    """
+    if not isinstance(event, dict):
+        return {}
+    nested = event.get("arguments")
+    if isinstance(nested, dict):
+        return nested
+    return event
+
+
 def _spoof_attempt(event):
     """Return the caller-supplied spoof-capable fields, or ``None`` if absent."""
-    args = event.get("arguments") or {}
+    args = _arguments(event)
     attempted = {key: args[key] for key in _SPOOF_KEYS if key in args}
     return attempted or None
 
@@ -267,9 +293,13 @@ def _build_query(tenant_id, groups, query_text, permit_id):
 
     The ``tenant_id`` term filter and the ACL predicate are constructed from the
     verified context before any caller content-matching clause is added, and the
-    caller cannot replace or remove them. Optional keyword clauses are added as
-    ``must`` clauses only; a k-NN clause is added the same way when the caller
-    supplies a query vector, without ever touching the isolation filter.
+    caller cannot replace or remove them.
+
+    Matching clauses (permit_id term and free-text) are combined as alternatives
+    (``should`` with ``minimum_should_match: 1``), NOT as ``must``. An exact
+    permit_id lookup must return the document even when the free-text of the
+    caller's prompt does not overlap the document body; putting both in ``must``
+    let a non-matching prompt veto an exact permit_id hit and return zero rows.
     """
     acl_clause = {
         "bool": {
@@ -280,11 +310,11 @@ def _build_query(tenant_id, groups, query_text, permit_id):
             "minimum_should_match": 1,
         }
     }
-    query_clauses = []
+    should_clauses = []
     if permit_id:
-        query_clauses.append({"term": {"permit_id": permit_id}})
+        should_clauses.append({"term": {"permit_id": permit_id}})
     if query_text:
-        query_clauses.append(
+        should_clauses.append(
             {
                 "multi_match": {
                     "query": query_text,
@@ -292,18 +322,20 @@ def _build_query(tenant_id, groups, query_text, permit_id):
                 }
             }
         )
-    if not query_clauses:
-        query_clauses.append({"match_all": {}})
+
+    bool_query = {
+        # Immutable, server-derived isolation controls. Always applied.
+        "filter": [{"term": {"tenant_id": tenant_id}}, acl_clause],
+    }
+    if should_clauses:
+        bool_query["should"] = should_clauses
+        bool_query["minimum_should_match"] = 1
+    else:
+        bool_query["must"] = [{"match_all": {}}]
 
     return {
         "size": 5,
-        "query": {
-            "bool": {
-                "must": query_clauses,
-                # Immutable, server-derived isolation controls. Always applied.
-                "filter": [{"term": {"tenant_id": tenant_id}}, acl_clause],
-            }
-        },
+        "query": {"bool": bool_query},
         "_source": [
             "permit_id",
             "title",
@@ -345,7 +377,7 @@ def handler(event, _context):
             {"attempted": spoof, "effective_tenant_id": tenant_id, "subject": subject},
         )
 
-    args = event.get("arguments") or {}
+    args = _arguments(event)
     query_text = (args.get("query") or "").strip()
     permit_id = (args.get("permit_id") or "").strip()
     body = _build_query(tenant_id, groups, query_text, permit_id)

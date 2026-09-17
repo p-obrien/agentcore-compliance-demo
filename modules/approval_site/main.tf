@@ -17,6 +17,7 @@ data "archive_file" "api" {
   type        = "zip"
   source_dir  = "${path.module}/src/api"
   output_path = "${path.module}/build/api.zip"
+  excludes    = ["__pycache__"] # never ship stale bytecode that can shadow the .py
 }
 
 resource "aws_iam_role" "api" {
@@ -46,7 +47,7 @@ resource "aws_iam_role_policy" "api" {
       },
       {
         Effect   = "Allow"
-        Action   = ["dynamodb:Query", "dynamodb:UpdateItem", "dynamodb:PutItem"]
+        Action   = ["dynamodb:Query", "dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:PutItem"]
         Resource = [var.pending_table_arn, "${var.pending_table_arn}/index/*", var.audit_table_arn]
       },
       {

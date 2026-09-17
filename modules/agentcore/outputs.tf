@@ -28,6 +28,16 @@ output "runtime_ids" {
   value       = { for k, r in awscc_bedrockagentcore_runtime.this : k => r.agent_runtime_id }
 }
 
+output "runtime_arns" {
+  description = "AgentCore runtime ARNs (empty until a real agent image is applied)."
+  value       = { for k, r in awscc_bedrockagentcore_runtime.this : k => r.agent_runtime_arn }
+}
+
+output "assessment_runtime_arn" {
+  description = "Assessment runtime ARN, or empty string until an image is applied. Consumed by the demo web API for InvokeAgentRuntime."
+  value       = try(awscc_bedrockagentcore_runtime.this["assessment"].agent_runtime_arn, "")
+}
+
 output "provisioning_summary" {
   description = "How AgentCore was provisioned, surfaced at the root for operator clarity."
   value = join("\n", [

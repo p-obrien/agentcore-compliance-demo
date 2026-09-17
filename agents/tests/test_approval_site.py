@@ -197,6 +197,22 @@ def test_groups_parsed_from_json_string(authz):
     assert approver.tenants == frozenset({"agency-b"})
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("[agency-b-approvers]", frozenset({"agency-b"})),
+        ("[agency-a-approvers agency-c-approvers]", frozenset({"agency-a", "agency-c"})),
+        ("agency-b-approvers", frozenset({"agency-b"})),
+    ],
+)
+def test_groups_parsed_from_http_api_flattened_claim(authz, raw, expected):
+    """API Gateway HTTP API flattens cognito:groups to a bracketed, space-
+    separated, unquoted string. The parser must handle that form, not only a
+    JSON array, or a valid approver is denied."""
+    approver = authz.approver_context({"sub": "sub-1", "cognito:groups": raw})
+    assert approver.tenants == expected
+
+
 def test_multi_tenant_approver_scope(authz):
     """An approver holding two tenant groups is scoped to exactly those tenants."""
     approver = authz.approver_context(

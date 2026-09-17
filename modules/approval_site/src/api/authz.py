@@ -14,6 +14,7 @@ denied without returning content.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 TENANTS = ("agency-a", "agency-b", "agency-c")
@@ -45,16 +46,31 @@ class ApproverContext:
 
 
 def parse_groups(raw: object) -> list[str]:
-    """Normalize a ``cognito:groups`` claim (list or delimited string) to a list."""
+    """Normalize a ``cognito:groups`` claim (list or delimited string) to a list.
+
+    The API Gateway HTTP API JWT authorizer flattens a multi-valued claim to a
+    bracketed, space-separated string like ``[agency-a-approvers]`` (unquoted,
+    no commas). A plain ``json.loads`` on the leading ``[`` fails on that form
+    and would drop the group, denying a valid approver. Handle the JSON-array
+    string, the HTTP API bracketed form, a comma/space-delimited string, and a
+    native list.
+    """
     if isinstance(raw, list):
-        return [g for g in raw if isinstance(g, str)]
-    if isinstance(raw, str):
+        return [g for g in raw if isinstance(g, str) and g.strip()]
+    if not isinstance(raw, str):
+        return []
+    s = raw.strip()
+    if not s:
+        return []
+    if s.startswith("["):
         try:
-            parsed = json.loads(raw) if raw.startswith("[") else raw.split(",")
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                return [g.strip() for g in parsed if isinstance(g, str) and g.strip()]
         except json.JSONDecodeError:
-            return []
-        return [g.strip() for g in parsed if isinstance(g, str) and g.strip()]
-    return []
+            pass
+        s = s[1:-1] if s.endswith("]") else s[1:]
+    return [g for g in re.split(r"[,\s]+", s.strip()) if g]
 
 
 def approver_context(claims: dict) -> ApproverContext:

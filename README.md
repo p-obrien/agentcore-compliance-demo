@@ -36,7 +36,7 @@ Read the diagram from left to right: a signed Cognito identity identifies the ag
 
 ## What this repository deploys
 
-[`main.tf`](main.tf) composes ten modules. The table names the parts that matter when reading the code or investigating a demo result.
+[`main.tf`](main.tf) composes twelve modules. The table names the parts that matter when reading the code or investigating a demo result.
 
 | Module | What it creates or enforces | Key implementation files |
 |---|---|---|
@@ -47,6 +47,8 @@ Read the diagram from left to right: a signed Cognito identity identifies the ag
 | [`modules/guardrails`](modules/guardrails) | Bedrock prompt-attack, cross-tenant-topic, PII, and grounding controls | [`modules/guardrails/main.tf`](modules/guardrails/main.tf) |
 | [`modules/approval_flow`](modules/approval_flow) | Pending approvals, Step Functions callback workflow, and write-back rules | [`modules/approval_flow/main.tf`](modules/approval_flow/main.tf) |
 | [`modules/approval_site`](modules/approval_site) | Cognito-protected approval API and CloudFront-hosted approval page | [`modules/approval_site`](modules/approval_site) |
+| [`modules/demo_site`](modules/demo_site) | Cognito-protected demo API and CloudFront-hosted guided walkthrough page, with a relay Lambda and tenant-scoped audit panel | [`modules/demo_site/main.tf`](modules/demo_site/main.tf) |
+| [`modules/seed_runner`](modules/seed_runner) | One-shot in-VPC Lambda that loads the synthetic documents during `make deploy` | [`modules/seed_runner/main.tf`](modules/seed_runner/main.tf) |
 | [`modules/audit`](modules/audit) | Append-only audit table and read-only trace projection | [`modules/audit/main.tf`](modules/audit/main.tf) |
 | [`modules/network`](modules/network) | VPC, private subnets, private OpenSearch security groups, and endpoint or NAT egress | [`modules/network/main.tf`](modules/network/main.tf) |
 | [`modules/iam_boundary`](modules/iam_boundary) | Permissions boundary applied to workload roles | [`modules/iam_boundary`](modules/iam_boundary) |
@@ -96,6 +98,8 @@ The handler adds caller content matching only as a `must` clause. It cannot remo
 [`modules/opensearch/main.tf`](modules/opensearch/main.tf) maps `agency-a` and `agency-b` to the shared domain and the `${name_prefix}-os-shared-read` role. It maps `agency-c` to the dedicated domain and the `${name_prefix}-os-dedicated-read` role.
 
 Each read role permits only `es:ESHttpGet` and `es:ESHttpPost` against its own domain. Both roles trust only the retrieval Lambda role. The seed role is separate and adds `es:ESHttpPut` so [`seed/load_seed.py`](seed/load_seed.py) can create the `permits` index and load the fixture data. The OpenSearch operator role is separate from every agent, Gateway, seed, and retrieval role.
+
+Control ownership: OpenSearch and the retrieval Lambda own retrieval filtering and the domain access policies. AgentCore owns identity, tool scope, and session isolation. AgentCore does not replace the retrieval filtering or the OpenSearch access policies; it establishes the verified identity and the signed session that those controls act on. The shared A/B tier is filter-enforced: the retrieval Lambda adds the verified `tenant_id` and group filters to every query. The dedicated Agency C tier is access-policy-enforced: AWS denies the shared read role at the domain boundary before any query runs, plus a document-level `tenant_id = agency-c` filter.
 
 The module applies matching OpenSearch Security backend-role mappings from a private reconciliation Lambda during `tofu apply`. The shared role can search only the shared domain's `permits` index; the dedicated role has the same index restriction plus a fixed `tenant_id = agency-c` document-level security filter. Seed can only check or create `permits`, index a document, and refresh the index. Agencies A and B deliberately share one read role, so their per-agency isolation remains the retrieval Lambda's verified-context `tenant_id` and group filters. Re-run the owned mappings after a manual OpenSearch Security change with:
 
@@ -162,13 +166,14 @@ make deploy
 
 `make deploy` runs `tofu init`, applies the base stack (reusing the saved digest on later runs), builds and pushes the ARM64 image, reads its immutable digest from `agents/.agent-image-uri`, applies that digest to create or update AgentCore runtimes and the Gateway target, then invokes the private seed runner. The command checks Lambda's `FunctionError` response and fails if the seed did not finish. Pass `SEED_RUNNER_PAYLOAD='{"no_embeddings":true}'` only when you deliberately want keyword retrieval without vectors.
 
-The loader inserts the ten documents in `seed/documents.json` under their `permit_id` values. It retries initialisation responses `403`, `429`, and `503`; reruns update the existing document IDs instead of duplicating them.
+The loader inserts the ten documents in `seed/documents.json` under their `permit_id` values. It retries only the initialisation responses `403`, `429`, and `503`, at most **5** retries after the initial attempt, using capped exponential backoff with jitter from `0.5` seconds up to a ceiling of `8 seconds`. On exhaustion it reports the permit id, target, final status, and action, then exits non-zero. Reruns update the existing document IDs instead of duplicating them.
 
 Useful outputs:
 
 ```bash
 tofu output demo_usernames
-tofu output demo_temporary_passwords       # sensitive temporary passwords
+tofu output demo_passwords                  # sensitive permanent passwords
+tofu output demo_page_url
 tofu output approval_page_url
 tofu output agentcore_gateway_url
 tofu output agentcore_runtime_ids
@@ -179,7 +184,30 @@ tofu output trace_read_function_name
 
 ## Demonstrate the controls
 
-The repository includes two different types of scripts. Keep the distinction clear when presenting results.
+There are three ways to drive the controls: the guided web interface (best for a live training session), the privileged retrieval rehearsals (prove the Lambda's server-side filters without a password), and the focused application-flow scripts. Keep the distinction clear when presenting results.
+
+### Guided web walkthrough
+
+`make deploy` provisions a hosted demo site alongside the stack. Open it and run the whole sequence from a browser, with the audit trail shown live after each step:
+
+```bash
+tofu output demo_page_url
+```
+
+The page signs an assessor in through the Cognito Hosted UI (authorization code + PKCE) using the agent client, so the browser holds a real per-user access token and companion ID token. It then drives four guided scenarios against the assessment runtime and refreshes a tenant-scoped audit panel after each:
+
+| Scenario | Signed-in as | Request | What the audit panel shows |
+|---|---|---|---|
+| Happy path | Agency A | `A-1001` | `retrieval` then `assessment_review_requested` for `agency-a` |
+| Cross-agency request | Agency A | `permit_id=B-2001` | `retrieval` with count 0; no Agency B content in the draft |
+| Tenant spoof | Agency A | prompt says `tenant_id=agency-b` | `tenant_spoof_attempt_ignored`; effective tenant stays `agency-a` |
+| Poisoned document | Agency B | `B-9999-POISON` | `guardrail_input` routes the injection to human review |
+
+The third card links to the existing approval page. Sign in there as `demo-operator@example.invalid`, approve or reject, then return and refresh the audit panel to see `approval_decision_authorized` and the proposal's terminal status.
+
+How the browser reaches the runtime, and why it does not weaken isolation: a static page cannot call `bedrock-agentcore:InvokeAgentRuntime` (SigV4, no CORS, no AWS credentials), so a small backend Lambda relays the call. It forwards your two Cognito tokens unchanged (`Authorization: Bearer <access>` and `X-Id-Token: <id>`) and holds no tenant logic. The runtime and retrieval Lambda still derive tenant from the signed claims, exactly as they do for any other client. The demo API's own IAM permits only `InvokeAgentRuntime` on the assessment runtime and `dynamodb:Query` on the audit table, so the web layer can neither reach another runtime nor write the trail. If a reviewer asks whether the web app enforces the boundary, the answer is no, and that is the point.
+
+The audit panel is read-only and scoped to the signed-in assessor's tenant. It derives that tenant from the verified `cognito:groups` claim on the access token, so an Agency A user cannot read Agency B's audit rows even by supplying an `interaction_id` from another agency.
 
 ### Privileged retrieval rehearsals
 
@@ -216,7 +244,7 @@ Authorization: Bearer <access-token>
 X-Id-Token: <id-token>
 ```
 
-The repository does not include a login helper or one-command AgentCore Runtime invocation. Change a demo user's temporary password through the Cognito Hosted UI reachable from `approval_page_url`, then use your approved Cognito client flow to obtain tokens and invoke an Assessment runtime.
+The repository does not include a login helper or one-command AgentCore Runtime invocation. The demo users have permanent passwords (read them with `tofu output demo_passwords`), so Hosted UI sign-in is a single step with no forced password change. Sign in through the Cognito Hosted UI reachable from `approval_page_url` or `demo_page_url`, then use your approved Cognito client flow to obtain tokens and invoke an Assessment runtime.
 
 A successful assessment returns metadata including `interaction_id`, `retrieved_count`, `grounding_score`, `review_reason`, and `approval_execution_arn`. Sign into the approval page as `demo-operator@example.invalid` to approve or reject the item, then inspect the trace:
 
@@ -263,7 +291,8 @@ make destroy
 
 ## Limits of this demo
 
-- All users, permits, PII-like values, and agency names are synthetic.
+- All users, permits, PII-like values, and agency names are synthetic. This demo uses only synthetic fixtures and does not use any production data.
+- This is a demonstration environment. It does not represent a production readiness determination and is not an IRAP assessment.
 - `demo-operator@example.invalid` is an approver for all three agencies only to simplify the demonstration. A production design must scope approvers by tenant.
 - Gateway target registration uses the AgentCore CLI and stores target IDs under `modules/agentcore/.agentcore`. Preserve OpenTofu state or the target cannot be destroyed automatically.
 - Docker Buildx is required for a local ARM64 build. Build the image in another suitable environment if Buildx is not available locally.

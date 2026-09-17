@@ -56,6 +56,7 @@ data "archive_file" "trace_read" {
   type        = "zip"
   source_dir  = "${path.module}/src/trace_read"
   output_path = "${path.module}/build/trace_read.zip"
+  excludes    = ["__pycache__"] # never ship stale bytecode that can shadow the .py
 }
 
 resource "aws_iam_role" "trace_read" {

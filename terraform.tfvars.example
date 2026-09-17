@@ -22,7 +22,7 @@ tags = {
 
 # Models via the Australia cross-region inference profiles. Override only if
 # the account uses different profile IDs.
-# model_assessment_id     = "apac.anthropic.claude-sonnet-4-5-20250929-v1:0"
-# model_classification_id = "apac.anthropic.claude-haiku-4-5-20251001-v1:0"
+# model_assessment_id     = "au.anthropic.claude-sonnet-5"
+# model_classification_id = "au.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 enable_scheduled_destroy = false

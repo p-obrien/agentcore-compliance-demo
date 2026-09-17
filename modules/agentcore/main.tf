@@ -285,8 +285,14 @@ resource "awscc_bedrockagentcore_runtime" "this" {
     }
   }
 
+  # AgentCore consumes the inbound `Authorization` header for the CUSTOM_JWT
+  # authorizer and does not forward it to the agent. The agent still needs the
+  # access token (to verify subject match and to authenticate the Gateway
+  # call), so the caller also sends it under `X-Access-Token`, which is
+  # allowlisted here and forwarded to the agent. `X-Id-Token` carries the
+  # companion ID token the same way.
   request_header_configuration = {
-    request_header_allowlist = ["Authorization", "X-Id-Token"]
+    request_header_allowlist = ["Authorization", "X-Id-Token", "X-Access-Token"]
   }
 
   environment_variables = {

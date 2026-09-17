@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -131,10 +132,21 @@ def _decode(token: str, *, audience: str | None) -> dict[str, Any]:
 def _groups(claims: dict[str, Any]) -> set[str]:
     groups = claims.get("cognito:groups", [])
     if isinstance(groups, str):
-        try:
-            groups = json.loads(groups) if groups.startswith("[") else groups.split(",")
-        except json.JSONDecodeError:
-            groups = []
+        s = groups.strip()
+        parsed: list[str] = []
+        if s.startswith("["):
+            try:
+                loaded = json.loads(s)
+                if isinstance(loaded, list):
+                    parsed = [g for g in loaded if isinstance(g, str)]
+                    s = ""
+            except json.JSONDecodeError:
+                # HTTP API flattens multi-valued claims to '[a b c]'
+                # (unquoted, space-separated); strip brackets then split.
+                s = s[1:-1] if s.endswith("]") else s[1:]
+        if s:
+            parsed = re.split(r"[,\s]+", s.strip())
+        groups = parsed
     if not isinstance(groups, list):
         return set()
     return {group.strip() for group in groups if isinstance(group, str) and group.strip()}
@@ -143,13 +155,15 @@ def _groups(claims: dict[str, Any]) -> set[str]:
 def resolve_tenant(request: dict[str, Any]) -> VerifiedIdentity:
     """Verify companion Cognito tokens and derive the only permitted tenant.
 
-    `X-Id-Token` is explicitly forwarded by AgentCore Runtime. The original
-    Bearer access token is also forwarded and is verified here before it is
-    reused to authenticate the Gateway request. Both tokens must belong to the
-    same Cognito subject and the configured agent client.
+    `X-Id-Token` is explicitly forwarded by AgentCore Runtime. AgentCore
+    consumes the inbound `Authorization` header for its own JWT authorizer and
+    does not forward it to the agent, so the caller also sends the access token
+    as `X-Access-Token`. Read that first and fall back to the `Authorization`
+    bearer for callers on a path where it is forwarded. Both tokens must belong
+    to the same Cognito subject and the configured agent client.
     """
     id_token = _header(request, "X-Id-Token")
-    access_token = _bearer(_header(request, "Authorization"))
+    access_token = _header(request, "X-Access-Token") or _bearer(_header(request, "Authorization"))
     if not id_token:
         raise NoTenantContextError("missing Cognito ID token")
 

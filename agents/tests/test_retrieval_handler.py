@@ -262,6 +262,57 @@ def test_property_3_tenant_routing_and_shared_query_constraints(
     assert terms_clause["terms"]["allowed_groups"] == [f"{tenant_id}-assessors"]
 
 
+def test_gateway_top_level_arguments_shape_is_supported(
+    handler_module, fresh_audit, monkeypatch
+):
+    """The AgentCore Gateway invokes the Lambda with tool arguments at the TOP
+    LEVEL of the event, not nested under `arguments`. Reading only `arguments`
+    dropped the session_token on the real Gateway path and returned
+    invalid_session_context with zero rows. Both shapes must resolve."""
+    doc = {"tenant_id": "agency-a", "permit_id": "A-1001", "title": "t", "body": "b"}
+    captured = _install_search(handler_module, monkeypatch, documents=[doc])
+    _reset_audit(handler_module)
+    token = _mint_token(
+        handler_module, tenant_id="agency-a", subject="user-1", interaction_id="int-1"
+    )
+    event = {"session_token": token, "query": "", "permit_id": "A-1001"}  # no wrapper
+    out = handler_module.handler(event, None)
+    assert out["count"] == 1
+    assert out.get("reason") != "invalid_session_context"
+    assert captured["body"] is not None
+
+
+def test_permit_id_is_not_vetoed_by_nonmatching_free_text(
+    handler_module, fresh_audit, monkeypatch
+):
+    """An exact permit_id lookup must still match when the prompt's free text
+    does not overlap the document. permit_id and free-text belong in `should`
+    (minimum_should_match: 1), not `must`; otherwise a non-matching prompt
+    zeroed out an exact permit fetch and the demo showed retrieved_count 0."""
+    captured = _install_search(handler_module, monkeypatch, documents=[])
+    _reset_audit(handler_module)
+    token = _mint_token(
+        handler_module, tenant_id="agency-a", subject="user-1", interaction_id="int-1"
+    )
+    event = {
+        "arguments": {
+            "session_token": token,
+            "query": "completely unrelated words zzz",
+            "permit_id": "A-1001",
+        }
+    }
+    handler_module.handler(event, None)
+
+    bool_q = captured["body"]["query"]["bool"]
+    # Matching clauses are should, satisfied by any one of them.
+    assert bool_q.get("minimum_should_match") == 1
+    assert "must" not in bool_q or bool_q["must"] == []
+    should = bool_q["should"]
+    assert {"term": {"permit_id": "A-1001"}} in should
+    # Isolation controls remain mandatory filters.
+    assert {"term": {"tenant_id": "agency-a"}} in bool_q["filter"]
+
+
 # ---------------------------------------------------------------------------
 # 3.5 Property 4: Shared-tier spoof noninterference and audit evidence
 # ---------------------------------------------------------------------------

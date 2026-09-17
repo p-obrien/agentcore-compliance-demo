@@ -23,6 +23,7 @@ data "archive_file" "tool" {
   type        = "zip"
   source_dir  = "${path.module}/src"
   output_path = "${path.module}/build/retrieval_tool.zip"
+  excludes    = ["__pycache__"] # never ship stale bytecode that can shadow the .py
 }
 
 resource "aws_iam_role" "tool" {
@@ -95,8 +96,8 @@ resource "aws_lambda_function" "tool" {
   handler          = "handler.handler"
   filename         = data.archive_file.tool.output_path
   source_code_hash = data.archive_file.tool.output_base64sha256
-  timeout          = 15
-  memory_size      = 256
+  timeout          = 29
+  memory_size      = 512
 
   vpc_config {
     subnet_ids         = var.vpc_subnet_ids

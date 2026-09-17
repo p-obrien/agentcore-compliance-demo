@@ -58,6 +58,7 @@ def _audit(interaction_id, tenant_id, action, outcome, detail):
             "outcome": {"S": outcome},
             "detail": {"S": json.dumps(detail)[:8000]},
         },
+        ConditionExpression="attribute_not_exists(interaction_id) AND attribute_not_exists(ts)",
     )
 
 

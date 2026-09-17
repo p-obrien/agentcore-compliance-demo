@@ -71,12 +71,14 @@ data "archive_file" "register_pending" {
   type        = "zip"
   source_dir  = "${path.module}/src/register_pending"
   output_path = "${path.module}/build/register_pending.zip"
+  excludes    = ["__pycache__"] # never ship stale bytecode that can shadow the .py
 }
 
 data "archive_file" "write_back" {
   type        = "zip"
   source_dir  = "${path.module}/src/write_back"
   output_path = "${path.module}/build/write_back.zip"
+  excludes    = ["__pycache__"] # never ship stale bytecode that can shadow the .py
 }
 
 resource "aws_iam_role" "register_pending" {

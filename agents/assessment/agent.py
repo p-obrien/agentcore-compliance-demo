@@ -99,9 +99,19 @@ def _start_approval(*, interaction_id: str, tenant_id: str, subject: str, permit
 
 
 @app.entrypoint
-async def handler(request):
+async def handler(request, context=None):
+    # AgentCore delivers the invocation payload as `request` and the forwarded
+    # (allowlisted) HTTP headers on the RequestContext, not inside the payload.
+    # The second parameter MUST be named `context` for the framework to pass
+    # it. resolve_tenant needs the Cognito headers, so merge them in.
+    headers = {}
+    if context is not None:
+        headers = getattr(context, "request_headers", None) or {}
+    request_with_headers = dict(request or {})
+    request_with_headers["headers"] = headers
+
     try:
-        identity = resolve_tenant(request)
+        identity = resolve_tenant(request_with_headers)
     except NoTenantContextError as exc:
         yield {"error": str(exc), "tenant_id": None}
         return
@@ -111,8 +121,8 @@ async def handler(request):
         yield {"error": "prompt must be a non-empty string"}
         return
 
-    context = request.get("context") or {}
-    permit_id = context.get("permit_id") if isinstance(context.get("permit_id"), str) else ""
+    payload_context = request.get("context") or {}
+    permit_id = payload_context.get("permit_id") if isinstance(payload_context.get("permit_id"), str) else ""
     interaction_id = str(uuid.uuid4())
     session_token = session_context_for_tool(identity, interaction_id)
 
@@ -175,8 +185,15 @@ async def handler(request):
     draft_parts: list[str] = []
     agent = Agent(model=_build_model(), system_prompt=SYSTEM_PROMPT)
     async for event in agent.stream_async(grounded_prompt):
-        draft_parts.append(_event_text(event))
-        yield event
+        # Strands yields rich event dicts (including non-serializable objects
+        # like the Agent instance and trace handles). Never forward the raw
+        # event: it serializes to an ugly JSON/dict blob in the client. Emit
+        # only the incremental generated text, which Strands puts in
+        # ``event["data"]`` per its streaming contract.
+        delta = event.get("data") if isinstance(event, dict) else None
+        if isinstance(delta, str) and delta:
+            draft_parts.append(delta)
+            yield {"text": delta}
 
     draft = "".join(draft_parts).strip()
     score, review_reason = evaluate_grounding(source=safe_context, query=prompt, draft=draft)

@@ -54,14 +54,27 @@ resource "aws_cognito_user_pool_domain" "this" {
 }
 
 resource "aws_cognito_user_pool_client" "agent" {
-  name                                 = "${var.name_prefix}-agent-client"
-  user_pool_id                         = aws_cognito_user_pool.this.id
-  generate_secret                      = false
-  prevent_user_existence_errors        = "ENABLED"
-  explicit_auth_flows                  = ["ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_USER_PASSWORD_AUTH", "ALLOW_USER_SRP_AUTH"]
-  allowed_oauth_flows_user_pool_client = false
-  access_token_validity                = 60
-  id_token_validity                    = 60
+  name                          = "${var.name_prefix}-agent-client"
+  user_pool_id                  = aws_cognito_user_pool.this.id
+  generate_secret               = false
+  prevent_user_existence_errors = "ENABLED"
+  explicit_auth_flows           = ["ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_USER_PASSWORD_AUTH", "ALLOW_USER_SRP_AUTH"]
+
+  # The demo web interface signs assessors in through the Cognito Hosted UI
+  # (authorization-code + PKCE) and forwards the resulting access and ID tokens
+  # to the assessment runtime. The runtime and retrieval Lambda still derive
+  # tenant only from the verified ID-token claims, so enabling the browser flow
+  # here does not move the tenant boundary. USER_PASSWORD / SRP flows remain for
+  # the existing token-minting paths.
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  supported_identity_providers         = ["COGNITO"]
+  callback_urls                        = [var.demo_site_callback_url]
+  logout_urls                          = [var.demo_site_callback_url]
+
+  access_token_validity = 60
+  id_token_validity     = 60
   token_validity_units {
     access_token = "minutes"
     id_token     = "minutes"
@@ -107,6 +120,16 @@ resource "random_password" "demo" {
   length           = 24
   special          = true
   override_special = "!#$%*+-_"
+
+  # The Cognito pool policy requires each character class. random_password does
+  # not guarantee class coverage on its own, so a run can produce a value with
+  # no digit and AdminCreateUser rejects it ("Password must have numeric
+  # characters"). Force a minimum from every class to make creation
+  # deterministic.
+  min_numeric = 2
+  min_lower   = 2
+  min_upper   = 2
+  min_special = 2
 }
 
 resource "aws_cognito_user" "demo" {
@@ -129,6 +152,35 @@ resource "aws_cognito_user" "demo" {
   # require a user replacement, not an in-place attribute update.
   lifecycle {
     ignore_changes = [attributes]
+  }
+}
+
+# Make the demo passwords permanent so users never hit the Cognito
+# FORCE_CHANGE_PASSWORD challenge. `aws_cognito_user` can only set a
+# `temporary_password`, which forces a change-password step on first Hosted UI
+# login and repeatedly tripped up the guided demo. This is a throwaway training
+# lab with synthetic identities, so a one-step login is the right tradeoff.
+# The provisioner re-runs whenever the username or generated password changes.
+resource "null_resource" "demo_permanent_password" {
+  for_each = local.demo_user_ids
+
+  triggers = {
+    user_pool_id = aws_cognito_user_pool.this.id
+    username     = aws_cognito_user.demo[each.key].username
+    # Bind to the password so a regenerated value re-applies. Marked sensitive
+    # by random_password; kept out of logs by passing via environment.
+    password_sha = sha256(random_password.demo[each.key].result)
+    region       = var.region
+  }
+
+  provisioner "local-exec" {
+    command = "aws cognito-idp admin-set-user-password --region \"$REGION\" --user-pool-id \"$POOL\" --username \"$USERNAME\" --password \"$PASSWORD\" --permanent"
+    environment = {
+      REGION   = var.region
+      POOL     = aws_cognito_user_pool.this.id
+      USERNAME = aws_cognito_user.demo[each.key].username
+      PASSWORD = random_password.demo[each.key].result
+    }
   }
 }
 

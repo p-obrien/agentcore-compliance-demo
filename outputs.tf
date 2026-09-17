@@ -10,6 +10,16 @@ output "approval_api_base_url" {
   value       = module.approval_site.api_base_url
 }
 
+output "demo_page_url" {
+  description = "CloudFront demo web interface for the guided training walkthrough (assessor login, assessment, live audit panel)."
+  value       = module.demo_site.cloudfront_url
+}
+
+output "demo_api_base_url" {
+  description = "Cognito JWT-protected demo API base URL."
+  value       = module.demo_site.api_base_url
+}
+
 output "opensearch_managed_domain_endpoints" {
   description = "Shared and dedicated managed-domain HTTPS endpoints. SigV4 and domain access policies still control access."
   value       = module.opensearch.managed_domain_endpoints
@@ -63,9 +73,9 @@ output "cognito_approval_client_id" { value = module.identity.approval_client_id
 output "session_context_secret_arn" { value = module.identity.session_context_secret_arn }
 output "demo_usernames" { value = module.identity.demo_usernames }
 
-output "demo_temporary_passwords" {
-  description = "Initial Cognito passwords. Read explicitly with tofu output -raw; users must change them on first sign-in."
-  value       = module.identity.demo_temporary_passwords
+output "demo_passwords" {
+  description = "Permanent Cognito passwords for the demo users. Read with tofu output demo_passwords. Single-step Hosted UI login; no forced password change."
+  value       = module.identity.demo_passwords
   sensitive   = true
 }
 

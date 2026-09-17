@@ -68,25 +68,54 @@ ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 REPO_URL="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${REPO_NAME}"
 IMAGE_TAG="${REPO_URL}:${TAG}"
 
+# Ensure the ECR repository exists before pushing. In the `make deploy` flow
+# the base `tofu apply` creates it first, so this is normally a no-op. It is a
+# safety net for the cases that broke a deploy before: lost/partial state, or
+# running this script before the base apply. A missing repo otherwise fails
+# the push with "name unknown". Settings match the Terraform resource
+# (IMMUTABLE tags, no scan on push), so when the base apply runs afterward it
+# sees the repo unchanged. Idempotent: an existing repo is left untouched.
+if ! aws ecr describe-repositories \
+  --region "$REGION" \
+  --repository-names "$REPO_NAME" >/dev/null 2>&1; then
+  printf 'ECR repository %s not found; creating it.\n' "$REPO_NAME"
+  aws ecr create-repository \
+    --region "$REGION" \
+    --repository-name "$REPO_NAME" \
+    --image-tag-mutability IMMUTABLE \
+    --image-scanning-configuration scanOnPush=false >/dev/null
+fi
+
 aws ecr get-login-password --region "$REGION" \
   | "$ENGINE" login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 
 case "$ENGINE" in
   docker)
+    # --provenance=false is required. With provenance on, Buildx pushes an OCI
+    # image index (image manifest + attestation) and `aws ecr describe-images`
+    # returns the *index* digest. AgentCore Runtime expects a single-platform
+    # image manifest and rejects the index digest with "The specified image
+    # identifier does not exist in the repository." Disabling provenance pushes
+    # a plain linux/arm64 image whose digest is the one AgentCore runs.
     docker buildx build \
       --platform linux/arm64 \
-      --provenance=true \
+      --provenance=false \
       --tag "$IMAGE_TAG" \
       --push \
       "$(dirname "$0")"
     ;;
   podman)
+    # AgentCore Runtime resolves a Docker v2 schema 2 manifest
+    # (application/vnd.docker.distribution.manifest.v2+json). An OCI manifest
+    # (application/vnd.oci.image.manifest.v1+json) is rejected with the generic
+    # "The specified image identifier does not exist in the repository." Build
+    # and push in Docker format, not OCI.
     podman build \
       --platform linux/arm64 \
-      --format oci \
+      --format docker \
       --tag "$IMAGE_TAG" \
       "$(dirname "$0")"
-    podman push --format oci "$IMAGE_TAG"
+    podman push --format v2s2 "$IMAGE_TAG"
     ;;
 esac
 

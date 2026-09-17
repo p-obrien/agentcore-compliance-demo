@@ -84,13 +84,34 @@ module "approval_site" {
   permissions_boundary_arn   = module.iam_boundary.boundary_policy_arn
 }
 
+# Guided web interface for the training session: assessor login, buffered
+# assessment relay, and a tenant-scoped live audit panel. Like approval_site,
+# the CloudFront distribution does not depend on the rendered page object, so
+# feeding its URL back to the identity client callback is not a cycle.
+module "demo_site" {
+  source = "./modules/demo_site"
+
+  name_prefix              = var.name_prefix
+  tags                     = var.tags
+  audit_table_name         = module.audit.audit_table_name
+  audit_table_arn          = module.audit.audit_table_arn
+  audit_by_tenant_index    = "by-tenant"
+  assessment_runtime_arn   = module.agentcore.assessment_runtime_arn
+  cognito_issuer           = module.identity.issuer
+  cognito_agent_client_id  = module.identity.agent_client_id
+  cognito_hosted_ui_domain = module.identity.hosted_ui_domain
+  approval_page_url        = module.approval_site.cloudfront_url
+  permissions_boundary_arn = module.iam_boundary.boundary_policy_arn
+}
+
 module "identity" {
   source = "./modules/identity"
 
-  name_prefix           = var.name_prefix
-  tags                  = var.tags
-  region                = local.region
-  approval_callback_url = module.approval_site.cloudfront_url
+  name_prefix            = var.name_prefix
+  tags                   = var.tags
+  region                 = local.region
+  approval_callback_url  = module.approval_site.cloudfront_url
+  demo_site_callback_url = module.demo_site.cloudfront_url
 }
 
 module "retrieval_tool" {
@@ -120,6 +141,18 @@ module "seed_runner" {
   vpc_subnet_ids           = module.network.private_subnet_ids
   seed_security_group_id   = module.network.seed_security_group_id
   permissions_boundary_arn = module.iam_boundary.boundary_policy_arn
+}
+
+# Adopt an ECR repo that already exists in AWS but is not yet in state, instead
+# of failing the apply with RepositoryAlreadyExistsException. This happens when
+# agents/build.sh created the repo (its own safety net) before the base apply,
+# or after lost/partial state. `make deploy` passes the repo name only when the
+# repo exists; empty means create normally, and a repo already in state makes
+# this a no-op. Import blocks must live in the root module.
+import {
+  for_each = var.adopt_existing_ecr_repo != "" ? toset([var.adopt_existing_ecr_repo]) : toset([])
+  to       = module.agentcore.aws_ecr_repository.agents
+  id       = each.value
 }
 
 module "agentcore" {

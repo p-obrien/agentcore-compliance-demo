@@ -248,6 +248,22 @@ resource "aws_vpc_security_group_egress_rule" "retrieval_to_endpoints" {
   cidr_ipv4         = var.vpc_cidr
 }
 
+# DynamoDB is a GATEWAY endpoint reached over the AWS service prefix list, whose
+# addresses are public AWS ranges OUTSIDE the VPC CIDR. The vpc_cidr egress rule
+# above does not cover them, so without this rule the retrieval Lambda's audit
+# put_item connect-times-out on dynamodb.<region>.amazonaws.com. Allow 443 to
+# the DynamoDB prefix list when egress is via VPC endpoints.
+resource "aws_vpc_security_group_egress_rule" "retrieval_to_dynamodb" {
+  count = local.use_endpoints ? 1 : 0
+
+  security_group_id = aws_security_group.retrieval.id
+  description       = "HTTPS to DynamoDB gateway endpoint prefix list"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  prefix_list_id    = aws_vpc_endpoint.dynamodb[0].prefix_list_id
+}
+
 # --- seed-sg egress (443 to domain SG and required AWS APIs) ---
 resource "aws_vpc_security_group_egress_rule" "seed_to_domain" {
   security_group_id            = aws_security_group.seed.id

@@ -15,7 +15,17 @@ import uuid
 from typing import Any
 
 GATEWAY_URL = os.environ["GATEWAY_URL"].rstrip("/")
-MCP_PROTOCOL_VERSION = os.environ.get("MCP_PROTOCOL_VERSION", "2025-11-25")
+# The AgentCore Gateway exposes each target's tool namespaced as
+# "<target-name>___<tool-name>". The retrieval target is registered as
+# "retrieval-tool" with an inline tool "retrieval", so the callable name is
+# "retrieval-tool___retrieval". Calling the bare "retrieval" returns JSON-RPC
+# -32602 "Unknown tool". Override via env only if the target name changes.
+RETRIEVAL_TOOL_NAME = os.environ.get("RETRIEVAL_TOOL_NAME", "retrieval-tool___retrieval")
+# The AgentCore Gateway MCP endpoint negotiates a specific protocol version and
+# rejects anything else with JSON-RPC -32600 "Unsupported protocol version".
+# It currently supports 2025-03-26, so default to that. Override only if the
+# Gateway's supported version changes.
+MCP_PROTOCOL_VERSION = os.environ.get("MCP_PROTOCOL_VERSION", "2025-03-26")
 
 
 class GatewayMcpError(RuntimeError):
@@ -109,4 +119,4 @@ def retrieve(
     arguments: dict[str, Any] = {"query": query, "session_token": session_token}
     if permit_id:
         arguments["permit_id"] = permit_id
-    return _tool_result(_request("tools/call", {"name": "retrieval", "arguments": arguments}, access_token))
+    return _tool_result(_request("tools/call", {"name": RETRIEVAL_TOOL_NAME, "arguments": arguments}, access_token))

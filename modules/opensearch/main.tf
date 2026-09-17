@@ -463,10 +463,17 @@ resource "aws_lambda_function" "fgac_configurator" {
 # Invoke synchronously as part of apply. A failed FGAC reconciliation prevents
 # Make from reaching the seed runner, and trigger changes reapply the complete
 # Terraform-owned role and mapping definition.
+#
+# CREATE_ONLY, not CRUD: the reconcile only matters while the domains exist. A
+# delete-time invocation would run during destroy, after the destroy graph has
+# already started removing the STS interface endpoint and the Lambda's SG, so it
+# times out reaching STS from the now-isolated subnet and aborts `make destroy`.
+# The domains are being deleted anyway, so there is nothing to reconcile on the
+# way down.
 resource "aws_lambda_invocation" "fgac" {
   function_name   = aws_lambda_function.fgac_configurator.function_name
   input           = jsonencode({ operation = "reconcile" })
-  lifecycle_scope = "CRUD"
+  lifecycle_scope = "CREATE_ONLY"
   triggers = {
     code_hash = data.archive_file.fgac_configurator.output_base64sha256
     spec_hash = sha256(jsonencode(local.fgac_spec))

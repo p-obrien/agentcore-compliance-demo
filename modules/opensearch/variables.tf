@@ -64,7 +64,7 @@ variable "instance_count" {
 variable "engine_version" {
   description = "Amazon OpenSearch Service engine version."
   type        = string
-  default     = "OpenSearch_2.13"
+  default     = "OpenSearch_3.7"
 }
 
 variable "fgac_config_security_group_id" {

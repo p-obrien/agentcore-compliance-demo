@@ -277,6 +277,21 @@ def test_groups_parsed_from_json_string(tc_module, register_key):
     assert identity.allowed_groups == ("agency-a-assessors",)
 
 
+def test_access_token_from_x_access_token_header(tc_module, register_key):
+    """AgentCore consumes Authorization for its authorizer and does not forward
+    it, so the access token arrives as X-Access-Token. resolve_tenant must read
+    it from there when Authorization is absent."""
+    kid, private_pem = register_key
+    id_token = _sign(
+        private_pem, kid, _id_claims("agency-a", "user-1", ["agency-a-assessors"])
+    )
+    access_token = _sign(private_pem, kid, _access_claims("user-1"))
+    request = {"headers": {"X-Id-Token": id_token, "X-Access-Token": access_token}}
+    identity = tc_module.resolve_tenant(request)
+    assert identity.tenant_id == "agency-a"
+    assert identity.access_token == access_token
+
+
 def test_subject_mismatch_denied(tc_module, register_key):
     """ID and access tokens for different subjects are rejected."""
     kid, private_pem = register_key

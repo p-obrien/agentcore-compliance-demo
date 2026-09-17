@@ -10,4 +10,9 @@ variable "approval_callback_url" {
   type        = string
 }
 
+variable "demo_site_callback_url" {
+  description = "CloudFront demo-site URL registered as the agent client's Cognito Hosted UI callback/logout."
+  type        = string
+}
+
 variable "region" { type = string }

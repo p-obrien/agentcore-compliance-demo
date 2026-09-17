@@ -118,9 +118,18 @@ def _event_text(event: Any) -> str:
 
 
 @app.entrypoint
-async def handler(request):
+async def handler(request, context=None):
+    # The second parameter MUST be named `context` for AgentCore to pass the
+    # RequestContext. The forwarded (allowlisted) Cognito headers live there,
+    # not in the payload. Merge them in for resolve_tenant.
+    headers = {}
+    if context is not None:
+        headers = getattr(context, "request_headers", None) or {}
+    request_with_headers = dict(request or {})
+    request_with_headers["headers"] = headers
+
     try:
-        identity = resolve_tenant(request)
+        identity = resolve_tenant(request_with_headers)
     except NoTenantContextError as exc:
         yield {"error": str(exc), "tenant_id": None}
         return
@@ -130,8 +139,8 @@ async def handler(request):
         yield {"error": "prompt must be a non-empty string"}
         return
 
-    context = request.get("context") or {}
-    permit_id = context.get("permit_id") if isinstance(context.get("permit_id"), str) else None
+    payload_context = request.get("context") or {}
+    permit_id = payload_context.get("permit_id") if isinstance(payload_context.get("permit_id"), str) else None
     document_text = prompt
     interaction_id = str(uuid.uuid4())
     if permit_id:
